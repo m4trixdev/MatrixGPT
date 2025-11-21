@@ -1,0 +1,20 @@
+name: MatrixGPT
+version: 1.0.0
+main: br.com.m4trixdev.Main
+api-version: '1.17'
+author: M4trixDev
+description: Ferramenta de administração de IA para Minecraft
+
+commands:
+  gpt:
+    description: Gerencia o sistema de IA
+    usage: /gpt <on|off|reload>
+    permission: matrixgpt.admin
+
+permissions:
+  matrixgpt.admin:
+    description: Acesso completo ao sistema GPT
+    default: op
+  matrixgpt.admin.reload:
+    description: Permite recarregar as configurações
+    default: op
