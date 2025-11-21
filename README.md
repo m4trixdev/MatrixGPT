@@ -127,7 +127,7 @@ gpt, teleporta o Pedro para mim
 ### Build
 
 ```bash
-git clone https://github.com/seu-usuario/MatrixGPT.git
+git clone https://github.com/m4trixdev/MatrixGPT.git
 cd MatrixGPT
 ./gradlew shadowJar
 ```
