@@ -34,7 +34,7 @@ class ConfigManager(private val plugin: Main) {
         }
 
         val provider = config.getString("openai.provider")?.uppercase() ?: "OPENAI"
-        if (provider !in listOf("OPENAI", "ANTHROPIC", "GROQ", "OLLAMA", "OPENROUTER")) {
+        if (provider !in listOf("OPENAI", "ANTHROPIC", "GROQ", "OLLAMA", "OPENROUTER", "GEMINI")) {
             throw IllegalStateException("ERRO FATAL: Provedor de IA inválido: $provider")
         }
     }
@@ -50,7 +50,7 @@ class ConfigManager(private val plugin: Main) {
     fun getAIProvider(): String = config.getString("openai.provider", "OPENAI")!!.uppercase()
     fun getAPIKey(): String = config.getString("openai.api-key", "")!!
     fun getModel(): String = config.getString("openai.model", "gpt-4")!!
-    fun getMaxTokens(): Int = config.getInt("openai.max-tokens", 500)
+    fun getMaxTokens(): Int = config.getInt("openai.max-tokens", 1500)
     fun getTemperature(): Double = config.getDouble("openai.temperature", 0.7)
     fun getBaseUrl(): String? = config.getString("openai.base-url")
 

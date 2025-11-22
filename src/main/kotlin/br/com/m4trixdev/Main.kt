@@ -35,6 +35,9 @@ class Main : JavaPlugin() {
     }
 
     override fun onDisable() {
+        if (::gptManager.isInitialized) {
+            gptManager.shutdown()
+        }
         if (::databaseManager.isInitialized) {
             databaseManager.close()
         }

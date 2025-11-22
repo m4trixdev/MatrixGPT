@@ -15,6 +15,10 @@ class ChatListener(private val plugin: Main) : Listener {
     fun onChat(event: AsyncChatEvent) {
         val player = event.player
 
+        if (!player.hasPermission("matrixgpt.admin")) {
+            return
+        }
+
         if (!plugin.databaseManager.isGPTEnabled(player.uniqueId)) {
             return
         }

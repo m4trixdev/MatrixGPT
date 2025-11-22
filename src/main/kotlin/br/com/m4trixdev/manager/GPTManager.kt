@@ -10,15 +10,13 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.bukkit.Bukkit
 import org.bukkit.Statistic
 import org.bukkit.entity.Player
-import org.bukkit.command.CommandSender
-import org.bukkit.command.ConsoleCommandSender
+import org.bukkit.plugin.Plugin
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.logging.Handler
 import java.util.logging.LogRecord
-import java.util.logging.Level
 
 class GPTManager(private val plugin: Main) {
 
@@ -32,13 +30,29 @@ class GPTManager(private val plugin: Main) {
     private val retryAttempts = ConcurrentHashMap<String, Int>()
     private val conversationHistory = ConcurrentHashMap<UUID, MutableList<Map<String, String>>>()
     private val commandFeedback = ConcurrentHashMap<String, CommandFeedback>()
-    private val lastCommandError = ConcurrentHashMap<String, String>()
+    private val abbreviations = ConcurrentHashMap<String, MutableList<String>>()
+    private val pluginCache = ConcurrentHashMap<String, PluginInfo>()
 
     data class CommandFeedback(
         var successCount: Int = 0,
         var failCount: Int = 0,
         var lastError: String? = null,
-        var alternativeCommand: String? = null
+        var fullCommand: String? = null
+    )
+
+    data class PluginInfo(
+        val name: String,
+        val version: String,
+        val enabled: Boolean,
+        val commands: Map<String, CommandInfo>
+    )
+
+    data class CommandInfo(
+        val name: String,
+        val aliases: List<String>,
+        val description: String,
+        val usage: String,
+        val permission: String?
     )
 
     private val providerUrls = mapOf(
@@ -46,7 +60,8 @@ class GPTManager(private val plugin: Main) {
         "ANTHROPIC" to "https://api.anthropic.com/v1/messages",
         "GROQ" to "https://api.groq.com/openai/v1/chat/completions",
         "OLLAMA" to "http://localhost:11434/v1/chat/completions",
-        "OPENROUTER" to "https://openrouter.ai/api/v1/chat/completions"
+        "OPENROUTER" to "https://openrouter.ai/api/v1/chat/completions",
+        "GEMINI" to "https://generativelanguage.googleapis.com/v1beta/models/"
     )
 
     private val errorKeywords = listOf(
@@ -56,16 +71,89 @@ class GPTManager(private val plugin: Main) {
         "there is no", "does not exist", "could not", "exception"
     )
 
+    private val commonAbbreviations = mapOf(
+        "gm" to listOf("gamemode", "gm"),
+        "gmc" to listOf("gamemode creative", "gm creative", "gm c"),
+        "gms" to listOf("gamemode survival", "gm survival", "gm s"),
+        "gma" to listOf("gamemode adventure", "gm adventure", "gm a"),
+        "gmsp" to listOf("gamemode spectator", "gm spectator", "gm sp"),
+        "tp" to listOf("teleport", "tp"),
+        "tpa" to listOf("tpa", "teleport accept"),
+        "tphere" to listOf("tphere", "tp here"),
+        "ban" to listOf("ban", "tempban"),
+        "unban" to listOf("unban", "pardon"),
+        "wl" to listOf("whitelist", "wl"),
+        "inv" to listOf("inventory", "invsee"),
+        "ec" to listOf("enderchest", "ec"),
+        "heal" to listOf("heal", "health"),
+        "feed" to listOf("feed", "food"),
+        "fly" to listOf("fly", "flight"),
+        "speed" to listOf("speed", "walkspeed", "flyspeed"),
+        "invsee" to listOf("invsee", "inventory see"),
+        "ci" to listOf("clear inventory", "clear inv"),
+        "wb" to listOf("worldborder", "wb"),
+        "rg" to listOf("region", "rg", "worldguard"),
+        "co" to listOf("coreprotect", "co"),
+        "lp" to listOf("luckperms", "lp"),
+        "perm" to listOf("permission", "perm"),
+        "eff" to listOf("effect", "potion"),
+        "ench" to listOf("enchant", "enchantment")
+    )
+
+    init {
+        initializeAbbreviations()
+        updatePluginCache()
+    }
+
+    private fun initializeAbbreviations() {
+        for ((abbr, commands) in commonAbbreviations) {
+            abbreviations[abbr] = commands.toMutableList()
+        }
+    }
+
+    private fun updatePluginCache() {
+        pluginCache.clear()
+        for (plugin in Bukkit.getPluginManager().plugins) {
+            val commands = mutableMapOf<String, CommandInfo>()
+
+            for ((cmdName, cmdData) in plugin.description.commands) {
+                val aliases = (cmdData["aliases"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+                val description = cmdData["description"] as? String ?: "Sem descricao"
+                val usage = cmdData["usage"] as? String ?: "/$cmdName"
+                val permission = cmdData["permission"] as? String
+
+                commands[cmdName] = CommandInfo(
+                    name = cmdName,
+                    aliases = aliases,
+                    description = description,
+                    usage = usage,
+                    permission = permission
+                )
+            }
+
+            pluginCache[plugin.name.lowercase()] = PluginInfo(
+                name = plugin.name,
+                version = plugin.description.version,
+                enabled = plugin.isEnabled,
+                commands = commands
+            )
+        }
+    }
+
     fun processRequest(player: Player, message: String, errorContext: String? = null) {
         scope.launch {
             try {
+                updatePluginCache()
+
                 val context = buildFullContext(player)
                 val history = conversationHistory.getOrPut(player.uniqueId) { mutableListOf() }
 
+                val expandedMessage = expandAbbreviations(message)
+
                 val finalMessage = if (errorContext != null) {
-                    "ERRO NO COMANDO ANTERIOR: $errorContext\nPEDIDO ORIGINAL: $message\nAnalise o erro, entenda o problema e corrija o comando. Use sintaxe diferente se necessario."
+                    "ERRO NO COMANDO ANTERIOR: $errorContext\nPEDIDO ORIGINAL: $expandedMessage\nAnalise o erro, entenda o problema e corrija o comando. Use sintaxe diferente se necessario."
                 } else {
-                    message
+                    expandedMessage
                 }
 
                 history.add(mapOf("role" to "user", "content" to finalMessage))
@@ -90,6 +178,20 @@ class GPTManager(private val plugin: Main) {
         }
     }
 
+    private fun expandAbbreviations(message: String): String {
+        var expanded = message
+        val words = message.lowercase().split(" ")
+
+        for (word in words) {
+            if (abbreviations.containsKey(word)) {
+                val possibleCommands = abbreviations[word]!!
+                expanded = "$expanded [Abreviacao detectada: '$word' pode ser: ${possibleCommands.joinToString(", ")}]"
+            }
+        }
+
+        return expanded
+    }
+
     private fun buildFullContext(player: Player): String {
         val sb = StringBuilder()
         sb.appendLine(buildServerInfo())
@@ -103,6 +205,8 @@ class GPTManager(private val plugin: Main) {
         sb.appendLine(buildWorldsInfo())
         sb.appendLine()
         sb.appendLine(buildLearnedInfo())
+        sb.appendLine()
+        sb.appendLine(buildAbbreviationsInfo())
         return sb.toString()
     }
 
@@ -131,15 +235,52 @@ Porta: ${server.port}
 
     private fun buildPluginsInfo(): String {
         val plugins = Bukkit.getPluginManager().plugins
-        val sb = StringBuilder("=== PLUGINS (${plugins.size}) ===\n")
+        val sb = StringBuilder("=== LISTA COMPLETA DE PLUGINS INSTALADOS (${plugins.size}) ===\n")
+        sb.appendLine("IMPORTANTE: SEMPRE verifique se o plugin existe nesta lista antes de responder ou executar comandos!")
+        sb.appendLine()
+
+        val pluginNames = plugins.map { it.name.lowercase() }.toSet()
+        sb.appendLine("PLUGINS PRESENTES NO SERVIDOR:")
+        sb.appendLine(plugins.joinToString(", ") { it.name })
+        sb.appendLine()
+        sb.appendLine("PLUGINS NAO PRESENTES: Se perguntar sobre EssentialsX, Vault, WorldGuard, LuckPerms, etc")
+        sb.appendLine("e NAO estiver na lista acima, responda que NAO esta instalado!")
+        sb.appendLine()
+
         for (p in plugins) {
-            val status = if (p.isEnabled) "[ON]" else "[OFF]"
+            val status = if (p.isEnabled) "[ATIVO]" else "[DESATIVADO]"
             sb.appendLine("$status ${p.name} v${p.description.version}")
-            if (p.description.commands.isNotEmpty()) {
-                val cmds = p.description.commands.keys.take(5).joinToString(", ")
-                sb.appendLine("  Comandos: /$cmds")
+            sb.appendLine("  Autor: ${p.description.authors.joinToString(", ")}")
+            sb.appendLine("  Main: ${p.description.main}")
+
+            if (pluginCache.containsKey(p.name.lowercase())) {
+                val pluginInfo = pluginCache[p.name.lowercase()]!!
+                if (pluginInfo.commands.isNotEmpty()) {
+                    sb.appendLine("  Comandos registrados (${pluginInfo.commands.size}):")
+                    pluginInfo.commands.values.take(20).forEach { cmd ->
+                        sb.append("    /${cmd.name}")
+                        if (cmd.aliases.isNotEmpty()) {
+                            sb.append(" [aliases: ${cmd.aliases.joinToString(", ")}]")
+                        }
+                        sb.appendLine()
+                        sb.appendLine("      Descricao: ${cmd.description}")
+                        sb.appendLine("      Uso: ${cmd.usage}")
+                        if (cmd.permission != null) {
+                            sb.appendLine("      Permissao: ${cmd.permission}")
+                        }
+                    }
+                    if (pluginInfo.commands.size > 20) {
+                        sb.appendLine("    ... e mais ${pluginInfo.commands.size - 20} comandos")
+                    }
+                }
             }
+            sb.appendLine()
         }
+
+        sb.appendLine("TOTAL DE PLUGINS: ${plugins.size}")
+        sb.appendLine("PLUGINS ATIVOS: ${plugins.count { it.isEnabled }}")
+        sb.appendLine("PLUGINS DESATIVADOS: ${plugins.count { !it.isEnabled }}")
+
         return sb.toString()
     }
 
@@ -210,20 +351,30 @@ Mobs mortos: $mobKills
     }
 
     private fun buildLearnedInfo(): String {
-        if (commandFeedback.isEmpty()) return "=== APRENDIZADO ===\nNenhum comando registrado."
+        if (commandFeedback.isEmpty()) return "=== APRENDIZADO ===\nNenhum comando registrado ainda."
 
-        val sb = StringBuilder("=== APRENDIZADO ===\n")
-        sb.appendLine("Comandos que funcionam:")
+        val sb = StringBuilder("=== APRENDIZADO DE COMANDOS ===\n")
+        sb.appendLine("Comandos que FUNCIONARAM corretamente:")
         for ((cmd, fb) in commandFeedback) {
-            if (fb.successCount > fb.failCount) {
-                sb.appendLine("  /$cmd (${fb.successCount}x sucesso)")
+            if (fb.successCount > fb.failCount && fb.successCount > 0) {
+                sb.appendLine("  /${fb.fullCommand ?: cmd} - ${fb.successCount} execucoes bem-sucedidas")
             }
         }
-        sb.appendLine("Comandos com problemas:")
+        sb.appendLine()
+        sb.appendLine("Comandos que FALHARAM:")
         for ((cmd, fb) in commandFeedback) {
             if (fb.failCount > 0) {
-                sb.appendLine("  /$cmd (${fb.failCount}x falha) - ${fb.lastError}")
+                sb.appendLine("  /$cmd - ${fb.failCount} falhas - Ultimo erro: ${fb.lastError}")
             }
+        }
+        return sb.toString()
+    }
+
+    private fun buildAbbreviationsInfo(): String {
+        val sb = StringBuilder("=== ABREVIACOES CONHECIDAS ===\n")
+        sb.appendLine("Quando o usuario usar abreviacoes, interprete corretamente:")
+        for ((abbr, commands) in abbreviations.entries.take(20)) {
+            sb.appendLine("$abbr = ${commands.joinToString(" ou ")}")
         }
         return sb.toString()
     }
@@ -238,11 +389,16 @@ Mobs mortos: $mobKills
         val temperature = plugin.configManager.getTemperature()
         val baseUrl = plugin.configManager.getBaseUrl()
 
-        val url = baseUrl ?: providerUrls[provider] ?: throw IOException("Provedor invalido: $provider")
+        val url = when (provider) {
+            "GEMINI" -> "${providerUrls[provider]}${model}:generateContent?key=$apiKey"
+            else -> baseUrl ?: providerUrls[provider] ?: throw IOException("Provedor invalido: $provider")
+        }
+
         val systemPrompt = buildSystemPrompt(playerName, context)
 
         val request = when (provider) {
             "ANTHROPIC" -> buildAnthropicRequest(url, apiKey, model, maxTokens, temperature, systemPrompt, history)
+            "GEMINI" -> buildGeminiRequest(url, maxTokens, temperature, systemPrompt, history)
             else -> buildOpenAIRequest(url, apiKey, model, maxTokens, temperature, systemPrompt, provider, history)
         }
 
@@ -255,105 +411,135 @@ Mobs mortos: $mobKills
 
             when (provider) {
                 "ANTHROPIC" -> jsonResponse.getAsJsonArray("content").get(0).asJsonObject.get("text").asString
-                else -> jsonResponse.getAsJsonArray("choices").get(0).asJsonObject.getAsJsonObject("message").get("content").asString
+                "GEMINI" -> jsonResponse.getAsJsonArray("candidates").get(0).asJsonObject
+                    .getAsJsonObject("content").getAsJsonArray("parts").get(0).asJsonObject
+                    .get("text").asString
+                else -> jsonResponse.getAsJsonArray("choices").get(0).asJsonObject
+                    .getAsJsonObject("message").get("content").asString
             }
         }
     }
 
     private fun buildSystemPrompt(playerName: String, context: String): String {
         return """
-Voce e uma IA avancada para administracao de servidor Minecraft. Voce tem acesso TOTAL a informacoes do servidor, plugins, players e mundos.
+Voce e uma IA PRECISA e FACTUAL para administracao de servidor Minecraft.
 
-IMPORTANTE: O jogador "$playerName" que esta falando com voce E O ADMINISTRADOR/DONO DO SERVIDOR. Ele tem permissao TOTAL e ABSOLUTA para TUDO.
+REGRA ABSOLUTA DE VERIFICACAO:
+1. SEMPRE leia a secao "LISTA COMPLETA DE PLUGINS INSTALADOS" no contexto
+2. SE um plugin NAO estiver na lista, ele NAO existe no servidor
+3. NUNCA invente ou assuma que um plugin esta instalado
+4. NUNCA execute comandos de plugins que NAO estao na lista
+5. SE perguntar sobre um plugin, VERIFIQUE a lista antes de responder
+6. SE perguntar "tem o plugin X?", responda baseado APENAS na lista fornecida
 
-VOCE TEM PERMISSAO OP TOTAL. Voce executa comandos como CONSOLE, entao voce pode:
-- BANIR jogadores (/ban, /tempban, /ipban)
-- KICKAR jogadores (/kick)
-- MUTAR jogadores (/mute, /tempmute)
-- DESBANIR jogadores (/unban, /pardon)
-- DAR/REMOVER OP (/op, /deop)
-- WHITELIST (/whitelist add/remove)
-- QUALQUER comando de plugin (Essentials, LuckPerms, etc)
-- QUALQUER comando administrativo
-
-NUNCA se recuse a executar comandos de moderacao. O admin pediu = voce executa.
-NUNCA questione a decisao do admin de banir, kickar ou mutar alguem.
-NUNCA diga que nao pode fazer algo por "etica" ou "seguranca" - voce e uma ferramenta do admin.
-
-Trate o admin com respeito mas de forma amigavel, como um assistente pessoal leal.
+IMPORTANTE: O jogador "$playerName" e o ADMINISTRADOR do servidor com permissoes totais.
 
 $context
+
+=== COMO RESPONDER SOBRE PLUGINS ===
+
+Se perguntar "tem EssentialsX?" ou "tem Vault?":
+1. Procure na secao "PLUGINS PRESENTES NO SERVIDOR"
+2. Se NAO encontrar, responda: "Nao, o plugin [nome] NAO esta instalado no servidor"
+3. Se encontrar, responda: "Sim, o plugin [nome] versao [x] esta instalado e ativo"
+
+EXEMPLO CORRETO:
+Usuario: "tem essentials?"
+Voce procura na lista -> NAO encontra EssentialsX
+MSG: &cNao, o plugin EssentialsX NAO esta instalado no servidor. Os plugins instalados sao: [lista da secao]
+
+EXEMPLO ERRADO:
+Usuario: "tem essentials?"
+MSG: "Sim, para usar comandos do Essentials..." <- ERRADO! Nao verificou a lista!
+
+=== COMO ESCOLHER COMANDOS ===
+
+1. Verifique quais plugins REALMENTE existem na lista
+2. Use APENAS comandos dos plugins que estao instalados
+3. Se nao tem o plugin, use comandos vanilla do Minecraft
+4. Se o comando precisa de um plugin ausente, informe ao usuario
+
+EXEMPLO:
+Usuario: "me cura"
+- Se TEM EssentialsX: use /essentials:heal $playerName
+- Se NAO TEM EssentialsX: use /effect give $playerName instant_health 1 10
+- Ou informe: "Nao ha plugin de heal instalado, mas posso usar comandos vanilla"
 
 === FORMATO DE RESPOSTA ===
 MSG: mensagem para o jogador (use &a verde, &c vermelho, &e amarelo, &b azul, &6 dourado)
 CMD: /comando
 DELAY:segundos: /comando
 
-=== REGRAS DE COMANDOS (MUITO IMPORTANTE) ===
-1. Para dar itens com NBT/encantamentos, use o formato SIMPLES:
+=== REGRAS DE COMANDOS ===
+
+1. VERIFIQUE o plugin antes de usar o comando
+2. Use comandos vanilla se o plugin nao existir
+3. Para dar itens:
    /give $playerName minecraft:diamond_sword 1
    /enchant $playerName sharpness 5
-   NAO use NBT tags complexas como {Enchantments:[...]}
 
-2. Para efeitos:
+4. Para efeitos:
    /effect give $playerName speed 60 1
 
-3. Para teleporte:
+5. Para teleporte:
    /tp $playerName X Y Z
 
-4. Para gamemode:
+6. Para gamemode:
    /gamemode creative $playerName
 
-5. SEMPRE use comandos simples sem NBT complexo
+=== COMANDOS VANILLA DO MINECRAFT ===
+Use estes quando NAO houver plugins:
+/gamemode creative/survival/spectator/adventure [player]
+/tp [player] <x> <y> <z>
+/give [player] <item> [amount]
+/effect give [player] <effect> [seconds] [amplifier]
+/kill [player]
+/time set day/night
+/weather clear/rain/thunder
+/difficulty peaceful/easy/normal/hard
+/gamerule [rule] [value]
+/setworldspawn
+/spawnpoint [player]
+/clear [player]
+/enchant [player] <enchantment> [level]
+/xp add [player] [amount]
 
-=== COMANDOS DE MODERACAO (USE SEM MEDO) ===
-/ban NomeJogador motivo
-/tempban NomeJogador tempo motivo
-/ipban NomeJogador motivo
-/unban NomeJogador
-/pardon NomeJogador
-/kick NomeJogador motivo
-/mute NomeJogador motivo
-/tempmute NomeJogador tempo motivo
-/unmute NomeJogador
-/warn NomeJogador motivo
-/jail NomeJogador
-/op NomeJogador
-/deop NomeJogador
-/whitelist add NomeJogador
-/whitelist remove NomeJogador
-/gamemode creative/survival/spectator NomeJogador
+=== EXEMPLOS DE USO CORRETO ===
 
-=== SUAS CAPACIDADES ===
-1. EXECUTAR COMANDOS - gamemode, tp, give, kill, effect, time, weather, kick, ban, etc
-2. RESPONDER PERGUNTAS - sobre o servidor, plugins, players, mundos, configs
-3. ANALISAR DADOS - TPS, memoria, players online, estatisticas
-4. APRENDER - lembrar comandos que funcionam/falham e melhorar
-5. CONVERSAR - responder duvidas, dar dicas, ajudar o admin
+"gmc" ->
+Verifica lista de plugins
+- Se tem Essentials:
+  MSG: &aModo criativo ativado!
+  CMD: /essentials:gmc $playerName
+- Se NAO tem Essentials:
+  MSG: &aModo criativo ativado!
+  CMD: /gamemode creative $playerName
 
-=== SE RECEBER MENSAGEM DE ERRO ===
-- Analise o erro CUIDADOSAMENTE
-- Identifique o problema (sintaxe, NBT, argumentos)
-- Use uma abordagem MAIS SIMPLES
-- Divida em multiplos comandos se necessario
-- Por exemplo: em vez de /give com NBT, use /give simples + /enchant
+"tem o plugin Vault?" ->
+Verifica lista de plugins
+- Se encontrar Vault:
+  MSG: &aSim! O plugin Vault versao X.X esta instalado e ativo.
+- Se NAO encontrar:
+  MSG: &cNao, o plugin Vault NAO esta instalado no servidor.
 
-=== EXEMPLOS ===
-
-"me da uma espada afiada" ->
-MSG: &aAqui esta sua espada encantada!
-CMD: /give $playerName minecraft:diamond_sword 1
+"me da uma espada op" ->
+MSG: &aAqui esta sua espada suprema!
+CMD: /give $playerName minecraft:netherite_sword 1
 CMD: /enchant $playerName sharpness 5
+CMD: /enchant $playerName unbreaking 3
+CMD: /enchant $playerName fire_aspect 2
 
-"me mata em 5 segundos" ->
-MSG: &cVoce sera eliminado em &e5 segundos&c!
-DELAY:5: /kill $playerName
+"quais plugins tem instalado?" ->
+MSG: &eLista de plugins instalados:\n&7[lista exata da secao PLUGINS PRESENTES]
 
-"minha localizacao" ->
-MSG: &aVoce esta em &eX=100, Y=64, Z=-200 &ano mundo &bworld
+=== VERIFICACAO OBRIGATORIA ===
+Antes de CADA resposta ou comando:
+1. Leia a lista de plugins instalados
+2. Confirme se o plugin necessario existe
+3. Se nao existir, use alternativa vanilla ou informe o usuario
+4. NUNCA minta ou invente informacoes
 
-"como esta o servidor" ->
-MSG: &6Status:\n&7TPS: &a19.8\n&7Memoria: &e512/1024MB\n&7Players: &a5/20
+Seja PRECISO, FACTUAL e HONESTO sobre o estado do servidor.
 """.trimIndent()
     }
 
@@ -399,6 +585,42 @@ MSG: &6Status:\n&7TPS: &a19.8\n&7Memoria: &e512/1024MB\n&7Players: &a5/20
             .url(url)
             .addHeader("x-api-key", apiKey)
             .addHeader("anthropic-version", "2023-06-01")
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+    }
+
+    private fun buildGeminiRequest(
+        url: String, maxTokens: Int, temperature: Double, systemPrompt: String, history: List<Map<String, String>>
+    ): Request {
+        val contents = mutableListOf<Map<String, Any>>()
+
+        contents.add(mapOf(
+            "role" to "user",
+            "parts" to listOf(mapOf("text" to systemPrompt))
+        ))
+
+        for (msg in history.takeLast(10)) {
+            val role = when (msg["role"]) {
+                "assistant" -> "model"
+                else -> "user"
+            }
+            contents.add(mapOf(
+                "role" to role,
+                "parts" to listOf(mapOf("text" to msg["content"]!!))
+            ))
+        }
+
+        val requestBody = JsonObject().apply {
+            add("contents", gson.toJsonTree(contents))
+            add("generationConfig", JsonObject().apply {
+                addProperty("temperature", temperature)
+                addProperty("maxOutputTokens", maxTokens)
+            })
+        }
+
+        return Request.Builder()
+            .url(url)
             .addHeader("Content-Type", "application/json")
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
@@ -546,6 +768,7 @@ MSG: &6Status:\n&7TPS: &a19.8\n&7Memoria: &e512/1024MB\n&7Players: &a5/20
         val baseCmd = command.split(" ").firstOrNull() ?: return
         val fb = commandFeedback.getOrPut(baseCmd) { CommandFeedback() }
         fb.successCount++
+        fb.fullCommand = command
     }
 
     private fun recordFailure(command: String, error: String) {
@@ -569,5 +792,6 @@ MSG: &6Status:\n&7TPS: &a19.8\n&7Memoria: &e512/1024MB\n&7Players: &a5/20
         scope.cancel()
         retryAttempts.clear()
         conversationHistory.clear()
+        pluginCache.clear()
     }
 }
