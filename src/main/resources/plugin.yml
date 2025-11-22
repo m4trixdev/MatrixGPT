@@ -1,5 +1,5 @@
 name: MatrixGPT
-version: 2.1.0
+version: 2.1.2
 main: br.com.m4trixdev.Main
 api-version: '1.17'
 author: M4trixDev

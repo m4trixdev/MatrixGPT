@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "br.com.m4trixdev"
-version = "2.1.0"
+version = "2.1.2"
 
 repositories {
     mavenCentral()
