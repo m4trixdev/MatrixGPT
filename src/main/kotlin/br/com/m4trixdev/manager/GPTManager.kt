@@ -118,7 +118,7 @@ class GPTManager(private val plugin: Main) {
 
             for ((cmdName, cmdData) in plugin.description.commands) {
                 val aliases = (cmdData["aliases"] as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
-                val description = cmdData["description"] as? String ?: "Sem descricao"
+                val description = cmdData["description"] as? String ?: "No description"
                 val usage = cmdData["usage"] as? String ?: "/$cmdName"
                 val permission = cmdData["permission"] as? String
 
@@ -151,7 +151,7 @@ class GPTManager(private val plugin: Main) {
                 val expandedMessage = expandAbbreviations(message)
 
                 val finalMessage = if (errorContext != null) {
-                    "ERRO NO COMANDO ANTERIOR: $errorContext\nPEDIDO ORIGINAL: $expandedMessage\nAnalise o erro, entenda o problema e corrija o comando. Use sintaxe diferente se necessario."
+                    "PREVIOUS COMMAND ERROR: $errorContext\nORIGINAL REQUEST: $expandedMessage\nAnalyze the error and fix the command with correct syntax."
                 } else {
                     expandedMessage
                 }
@@ -171,9 +171,9 @@ class GPTManager(private val plugin: Main) {
 
             } catch (e: Exception) {
                 Bukkit.getScheduler().runTask(plugin, Runnable {
-                    player.sendMessage("§c[MatrixGPT] §7Erro: §f${e.message}")
+                    player.sendMessage("§c[MatrixGPT] §7Error: §f${e.message}")
                 })
-                plugin.logger.severe("Erro GPT: ${e.message}")
+                plugin.logger.severe("GPT Error: ${e.message}")
             }
         }
     }
@@ -185,7 +185,7 @@ class GPTManager(private val plugin: Main) {
         for (word in words) {
             if (abbreviations.containsKey(word)) {
                 val possibleCommands = abbreviations[word]!!
-                expanded = "$expanded [Abreviacao detectada: '$word' pode ser: ${possibleCommands.joinToString(", ")}]"
+                expanded = "$expanded [Abbreviation detected: '$word' could mean: ${possibleCommands.joinToString(", ")}]"
             }
         }
 
@@ -219,67 +219,64 @@ class GPTManager(private val plugin: Main) {
         val mcVersion = server.bukkitVersion.split("-")[0]
 
         return """
-=== SERVIDOR ===
-Nome: ${server.name}
-Versao MC: $mcVersion
-Versao Completa: ${server.version}
-MOTD: ${server.motd}
-Max Players: ${server.maxPlayers}
-Online: ${server.onlinePlayers.size}
-TPS: ${"%.2f".format(tps)}
-Memoria: ${usedMemory}MB / ${maxMemory}MB
-Modo Online: ${server.onlineMode}
-Porta: ${server.port}
+### SERVER INFORMATION
+- **Name**: ${server.name}
+- **MC Version**: $mcVersion
+- **Full Version**: ${server.version}
+- **MOTD**: ${server.motd}
+- **Max Players**: ${server.maxPlayers}
+- **Online Players**: ${server.onlinePlayers.size}
+- **TPS**: ${"%.2f".format(tps)}
+- **Memory**: ${usedMemory}MB / ${maxMemory}MB
+- **Online Mode**: ${server.onlineMode}
+- **Port**: ${server.port}
         """.trimIndent()
     }
 
     private fun buildPluginsInfo(): String {
         val plugins = Bukkit.getPluginManager().plugins
-        val sb = StringBuilder("=== LISTA COMPLETA DE PLUGINS INSTALADOS (${plugins.size}) ===\n")
-        sb.appendLine("IMPORTANTE: SEMPRE verifique se o plugin existe nesta lista antes de responder ou executar comandos!")
-        sb.appendLine()
+        val sb = StringBuilder("### INSTALLED PLUGINS LIST (${plugins.size} total)\n\n")
+        sb.appendLine("**IMPORTANT**: Always verify if a plugin exists in this list before responding or executing commands!\n")
 
-        val pluginNames = plugins.map { it.name.lowercase() }.toSet()
-        sb.appendLine("PLUGINS PRESENTES NO SERVIDOR:")
+        sb.appendLine("**PLUGINS PRESENT ON SERVER**:")
         sb.appendLine(plugins.joinToString(", ") { it.name })
         sb.appendLine()
-        sb.appendLine("PLUGINS NAO PRESENTES: Se perguntar sobre EssentialsX, Vault, WorldGuard, LuckPerms, etc")
-        sb.appendLine("e NAO estiver na lista acima, responda que NAO esta instalado!")
-        sb.appendLine()
+        sb.appendLine("**IF A PLUGIN IS NOT IN THE LIST ABOVE, IT DOES NOT EXIST ON THIS SERVER!**\n")
 
         for (p in plugins) {
-            val status = if (p.isEnabled) "[ATIVO]" else "[DESATIVADO]"
-            sb.appendLine("$status ${p.name} v${p.description.version}")
-            sb.appendLine("  Autor: ${p.description.authors.joinToString(", ")}")
-            sb.appendLine("  Main: ${p.description.main}")
+            val status = if (p.isEnabled) "✅ ACTIVE" else "❌ DISABLED"
+            sb.appendLine("#### $status ${p.name} v${p.description.version}")
+            sb.appendLine("- **Authors**: ${p.description.authors.joinToString(", ")}")
+            sb.appendLine("- **Main Class**: ${p.description.main}")
 
             if (pluginCache.containsKey(p.name.lowercase())) {
                 val pluginInfo = pluginCache[p.name.lowercase()]!!
                 if (pluginInfo.commands.isNotEmpty()) {
-                    sb.appendLine("  Comandos registrados (${pluginInfo.commands.size}):")
-                    pluginInfo.commands.values.take(20).forEach { cmd ->
-                        sb.append("    /${cmd.name}")
+                    sb.appendLine("- **Registered Commands** (${pluginInfo.commands.size}):")
+                    pluginInfo.commands.values.take(15).forEach { cmd ->
+                        sb.append("  - `/${cmd.name}`")
                         if (cmd.aliases.isNotEmpty()) {
-                            sb.append(" [aliases: ${cmd.aliases.joinToString(", ")}]")
+                            sb.append(" (aliases: ${cmd.aliases.joinToString(", ")})")
                         }
                         sb.appendLine()
-                        sb.appendLine("      Descricao: ${cmd.description}")
-                        sb.appendLine("      Uso: ${cmd.usage}")
+                        sb.appendLine("    - Description: ${cmd.description}")
+                        sb.appendLine("    - Usage: `${cmd.usage}`")
                         if (cmd.permission != null) {
-                            sb.appendLine("      Permissao: ${cmd.permission}")
+                            sb.appendLine("    - Permission: `${cmd.permission}`")
                         }
                     }
-                    if (pluginInfo.commands.size > 20) {
-                        sb.appendLine("    ... e mais ${pluginInfo.commands.size - 20} comandos")
+                    if (pluginInfo.commands.size > 15) {
+                        sb.appendLine("  - ... and ${pluginInfo.commands.size - 15} more commands")
                     }
                 }
             }
             sb.appendLine()
         }
 
-        sb.appendLine("TOTAL DE PLUGINS: ${plugins.size}")
-        sb.appendLine("PLUGINS ATIVOS: ${plugins.count { it.isEnabled }}")
-        sb.appendLine("PLUGINS DESATIVADOS: ${plugins.count { !it.isEnabled }}")
+        sb.appendLine("**SUMMARY**:")
+        sb.appendLine("- Total Plugins: ${plugins.size}")
+        sb.appendLine("- Active: ${plugins.count { it.isEnabled }}")
+        sb.appendLine("- Disabled: ${plugins.count { !it.isEnabled }}")
 
         return sb.toString()
     }
@@ -295,86 +292,87 @@ Porta: ${server.port}
             inv.chestplate?.type?.name,
             inv.leggings?.type?.name,
             inv.boots?.type?.name
-        ).joinToString(", ").ifEmpty { "Nenhuma" }
+        ).joinToString(", ").ifEmpty { "None" }
 
         val playTime = try { player.getStatistic(Statistic.PLAY_ONE_MINUTE) / 20 / 60 } catch (e: Exception) { 0 }
         val deaths = try { player.getStatistic(Statistic.DEATHS) } catch (e: Exception) { 0 }
         val mobKills = try { player.getStatistic(Statistic.MOB_KILLS) } catch (e: Exception) { 0 }
 
         return """
-=== JOGADOR ATUAL: ${player.name} ===
-UUID: ${player.uniqueId}
-Vida: ${player.health.toInt()}/${player.maxHealth.toInt()}
-Fome: ${player.foodLevel}/20
-XP Level: ${player.level}
-Gamemode: ${player.gameMode.name}
-Op: ${player.isOp}
-Flying: ${player.isFlying}
-Ping: ${player.ping}ms
+### CURRENT PLAYER: ${player.name}
+**Basic Info**:
+- UUID: `${player.uniqueId}`
+- Health: ${player.health.toInt()}/${player.maxHealth.toInt()}
+- Hunger: ${player.foodLevel}/20
+- XP Level: ${player.level}
+- Gamemode: ${player.gameMode.name}
+- OP Status: ${player.isOp}
+- Flying: ${player.isFlying}
+- Ping: ${player.ping}ms
 
-=== LOCALIZACAO ===
-Mundo: ${world.name} (${world.environment.name})
-Coordenadas: X=${loc.blockX}, Y=${loc.blockY}, Z=${loc.blockZ}
-Bioma: ${world.getBiome(loc.blockX, loc.blockY, loc.blockZ).key.key}
+**Location**:
+- World: ${world.name} (${world.environment.name})
+- Coordinates: X=${loc.blockX}, Y=${loc.blockY}, Z=${loc.blockZ}
+- Biome: ${world.getBiome(loc.blockX, loc.blockY, loc.blockZ).key.key}
 
-=== INVENTARIO ===
-Item na mao: ${mainHand.type.name} x${mainHand.amount}
-Armadura: $armor
+**Inventory**:
+- Main Hand: ${mainHand.type.name} x${mainHand.amount}
+- Armor: $armor
 
-=== ESTATISTICAS ===
-Tempo jogado: $playTime minutos
-Mortes: $deaths
-Mobs mortos: $mobKills
+**Statistics**:
+- Playtime: $playTime minutes
+- Deaths: $deaths
+- Mob Kills: $mobKills
         """.trimIndent()
     }
 
     private fun buildAllPlayersInfo(): String {
         val players = Bukkit.getOnlinePlayers()
-        if (players.isEmpty()) return "=== NENHUM PLAYER ONLINE ==="
+        if (players.isEmpty()) return "### NO PLAYERS ONLINE"
 
-        val sb = StringBuilder("=== TODOS PLAYERS ONLINE (${players.size}) ===\n")
+        val sb = StringBuilder("### ALL ONLINE PLAYERS (${players.size})\n\n")
         for (p in players) {
             val loc = p.location
-            sb.appendLine("${p.name}: Vida=${p.health.toInt()} | ${p.gameMode.name} | ${loc.world?.name} ${loc.blockX},${loc.blockY},${loc.blockZ} | Ping=${p.ping}ms")
+            sb.appendLine("- **${p.name}**: HP=${p.health.toInt()} | ${p.gameMode.name} | ${loc.world?.name} (${loc.blockX}, ${loc.blockY}, ${loc.blockZ}) | Ping=${p.ping}ms")
         }
         return sb.toString()
     }
 
     private fun buildWorldsInfo(): String {
         val worlds = Bukkit.getWorlds()
-        val sb = StringBuilder("=== MUNDOS (${worlds.size}) ===\n")
+        val sb = StringBuilder("### WORLDS (${worlds.size})\n\n")
         for (w in worlds) {
             val isDay = w.time in 0..12000
-            sb.appendLine("${w.name}: ${w.environment.name} | ${if (isDay) "DIA" else "NOITE"} | ${if (w.hasStorm()) "TEMPESTADE" else "LIMPO"} | Players: ${w.players.size}")
+            sb.appendLine("- **${w.name}**: ${w.environment.name} | ${if (isDay) "☀️ DAY" else "🌙 NIGHT"} | ${if (w.hasStorm()) "⛈️ STORM" else "☁️ CLEAR"} | Players: ${w.players.size}")
         }
         return sb.toString()
     }
 
     private fun buildLearnedInfo(): String {
-        if (commandFeedback.isEmpty()) return "=== APRENDIZADO ===\nNenhum comando registrado ainda."
+        if (commandFeedback.isEmpty()) return "### COMMAND LEARNING DATA\nNo commands executed yet."
 
-        val sb = StringBuilder("=== APRENDIZADO DE COMANDOS ===\n")
-        sb.appendLine("Comandos que FUNCIONARAM corretamente:")
+        val sb = StringBuilder("### COMMAND LEARNING DATA\n\n")
+        sb.appendLine("**✅ SUCCESSFUL COMMANDS**:")
         for ((cmd, fb) in commandFeedback) {
             if (fb.successCount > fb.failCount && fb.successCount > 0) {
-                sb.appendLine("  /${fb.fullCommand ?: cmd} - ${fb.successCount} execucoes bem-sucedidas")
+                sb.appendLine("- `/${fb.fullCommand ?: cmd}` - ${fb.successCount} successful executions")
             }
         }
         sb.appendLine()
-        sb.appendLine("Comandos que FALHARAM:")
+        sb.appendLine("**❌ FAILED COMMANDS**:")
         for ((cmd, fb) in commandFeedback) {
             if (fb.failCount > 0) {
-                sb.appendLine("  /$cmd - ${fb.failCount} falhas - Ultimo erro: ${fb.lastError}")
+                sb.appendLine("- `/$cmd` - ${fb.failCount} failures - Last error: ${fb.lastError}")
             }
         }
         return sb.toString()
     }
 
     private fun buildAbbreviationsInfo(): String {
-        val sb = StringBuilder("=== ABREVIACOES CONHECIDAS ===\n")
-        sb.appendLine("Quando o usuario usar abreviacoes, interprete corretamente:")
+        val sb = StringBuilder("### KNOWN ABBREVIATIONS\n\n")
+        sb.appendLine("When users use abbreviations, interpret them correctly:\n")
         for ((abbr, commands) in abbreviations.entries.take(20)) {
-            sb.appendLine("$abbr = ${commands.joinToString(" ou ")}")
+            sb.appendLine("- `$abbr` = ${commands.joinToString(" or ")}")
         }
         return sb.toString()
     }
@@ -391,7 +389,7 @@ Mobs mortos: $mobKills
 
         val url = when (provider) {
             "GEMINI" -> "${providerUrls[provider]}${model}:generateContent?key=$apiKey"
-            else -> baseUrl ?: providerUrls[provider] ?: throw IOException("Provedor invalido: $provider")
+            else -> baseUrl ?: providerUrls[provider] ?: throw IOException("Invalid provider: $provider")
         }
 
         val systemPrompt = buildSystemPrompt(playerName, context)
@@ -404,9 +402,9 @@ Mobs mortos: $mobKills
 
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IOException("Erro na API ($provider): ${response.code}")
+                throw IOException("API Error ($provider): ${response.code}")
             }
-            val responseBody = response.body?.string() ?: throw IOException("Resposta vazia")
+            val responseBody = response.body?.string() ?: throw IOException("Empty response")
             val jsonResponse = gson.fromJson(responseBody, JsonObject::class.java)
 
             when (provider) {
@@ -424,205 +422,284 @@ Mobs mortos: $mobKills
         return """
 # Minecraft Server AI Administrator
 
-You are a **PRECISE** and **FACTUAL** AI assistant for Minecraft server administration.
-
-## ⚠️ CRITICAL VERIFICATION RULES
-
-**BEFORE every response or command execution:**
-
-1. **ALWAYS** read the "LISTA COMPLETA DE PLUGINS INSTALADOS" section in the context
-2. **IF** a plugin is NOT in the list, it does NOT exist on the server
-3. **NEVER** assume or invent that a plugin is installed
-4. **NEVER** execute commands from plugins that are NOT in the list
-5. **IF** asked about a plugin, VERIFY the list before responding
-6. **ONLY** respond based on the actual plugin list provided
+You are an AI assistant specialized in **Minecraft server administration**. Your primary task is to **EXECUTE COMMANDS** based on administrator requests.
 
 ---
 
-## 👤 Current Administrator
+## 🎯 Your Role
 
-**Player**: `$playerName`  
-**Role**: Server Administrator with FULL permissions  
-**Authority**: Can execute ANY command including moderation, configuration, and management
-
----
-
-## 📋 Server Context
-
-$context
+**Current Administrator**: `$playerName`  
+**Permission Level**: FULL ACCESS (OP with all permissions)  
+**Authority**: Can execute ANY command including moderation, world management, and server configuration
 
 ---
 
-## 🔍 How to Answer About Plugins
+## 📋 MANDATORY RESPONSE FORMAT
 
-### Example Question: "Do you have EssentialsX?" or "Is Vault installed?"
+You **MUST** use these prefixes in **EVERY** response:
 
-**Process:**
-1. Search in the "PLUGINS PRESENTES NO SERVIDOR" section
-2. If **NOT found**: Respond "No, the plugin [name] is NOT installed on this server"
-3. If **found**: Respond "Yes, plugin [name] version [X.X] is installed and active"
-
-### ✅ CORRECT Example:
-```
-User: "do you have essentials?"
-You search the list → EssentialsX NOT found
-Response:
-MSG: &cNo, the EssentialsX plugin is NOT installed on this server. Installed plugins are: [list from section]
-```
-
-### ❌ WRONG Example:
-```
-User: "do you have essentials?"
-Response: "Yes, to use Essentials commands..." ← WRONG! Did not verify the list!
-```
-
----
-
-## 🎮 How to Choose Commands
-
-### Command Selection Process:
-
-1. **Verify** which plugins ACTUALLY exist in the list
-2. **Use ONLY** commands from installed plugins
-3. **If plugin missing**: Use vanilla Minecraft commands
-4. **If command requires missing plugin**: Inform the user
-
-### Example: "heal me"
+### Format Structure
 
 ```
-IF EssentialsX is installed:
-  MSG: &aHealing you!
-  CMD: /essentials:heal $playerName
-
-IF EssentialsX is NOT installed:
-  MSG: &aNo heal plugin installed, but I can use vanilla commands!
-  CMD: /effect give $playerName instant_health 1 10
+MSG: <message to player with color codes>
+CMD: <command to execute immediately>
+DELAY:<seconds>: <command to execute after delay>
 ```
 
----
-
-## 📤 Response Format
-
-**Format your responses using these prefixes:**
-
-- `MSG:` - Message to the player (use color codes: &a green, &c red, &e yellow, &b blue, &6 gold)
-- `CMD:` - Command to execute immediately
-- `DELAY:seconds:` - Command to execute after delay
-
-### Example:
-```
-MSG: &aGiving you an OP sword!
-CMD: /give $playerName minecraft:netherite_sword 1
-CMD: /enchant $playerName sharpness 5
-DELAY:2: /enchant $playerName unbreaking 3
-```
-
----
-
-## 🛠️ Vanilla Minecraft Commands
-
-**Use these when NO plugins are available:**
-
-### Player Management:
-- `/gamemode creative|survival|spectator|adventure [player]`
-- `/tp [player] <x> <y> <z>`
-- `/kill [player]`
-- `/clear [player]`
-- `/xp add [player] [amount]`
-
-### Items & Effects:
-- `/give [player] <item> [amount]`
-- `/enchant [player] <enchantment> [level]`
-- `/effect give [player] <effect> [seconds] [amplifier]`
-
-### World Management:
-- `/time set day|night`
-- `/weather clear|rain|thunder`
-- `/difficulty peaceful|easy|normal|hard`
-- `/gamerule [rule] [value]`
-- `/setworldspawn`
-- `/spawnpoint [player]`
+### Color Codes Available
+- `&a` = Green (success)
+- `&c` = Red (error/danger)
+- `&e` = Yellow (warning/info)
+- `&b` = Aqua (info)
+- `&6` = Gold (highlight)
+- `&7` = Gray (subtle)
+- `&f` = White (normal)
 
 ---
 
 ## 💡 Practical Examples
 
 ### Example 1: Gamemode Change
+**User says**: "gmc"
+
+**Your response**:
 ```
-User: "gmc" (abbreviation for gamemode creative)
-
-Check plugin list:
-- IF Essentials installed:
-  MSG: &aCreative mode activated!
-  CMD: /essentials:gmc $playerName
-
-- IF Essentials NOT installed:
-  MSG: &aCreative mode activated!
-  CMD: /gamemode creative $playerName
+MSG: &aCreative mode activated!
+CMD: gamemode creative $playerName
 ```
 
-### Example 2: Plugin Inquiry
+### Example 2: OP Sword Request
+**User says**: "give me op sword"
+
+**Your response**:
 ```
-User: "do you have Vault plugin?"
-
-Check plugin list:
-- IF Vault found:
-  MSG: &aYes! Vault version X.X is installed and active.
-
-- IF Vault NOT found:
-  MSG: &cNo, the Vault plugin is NOT installed on this server.
-```
-
-### Example 3: OP Item Request
-```
-User: "give me an op sword"
-
 MSG: &aHere's your supreme sword!
-CMD: /give $playerName minecraft:netherite_sword 1
-CMD: /enchant $playerName sharpness 5
-CMD: /enchant $playerName unbreaking 3
-CMD: /enchant $playerName fire_aspect 2
+CMD: give $playerName netherite_sword 1
+CMD: enchant $playerName sharpness 5
+CMD: enchant $playerName unbreaking 3
+CMD: enchant $playerName fire_aspect 2
 ```
 
-### Example 4: Plugin List
-```
-User: "what plugins are installed?"
+### Example 3: Healing
+**User says**: "heal me"
 
-MSG: &eInstalled plugins:\n&7[exact list from PLUGINS PRESENTES section]
+**Your response**:
+```
+MSG: &aHealing you now!
+CMD: effect give $playerName instant_health 1 10
+CMD: effect give $playerName regeneration 30 2
+CMD: effect give $playerName saturation 1 10
+```
+
+### Example 4: World Management
+**User says**: "make it day and clear weather"
+
+**Your response**:
+```
+MSG: &eChanging time to day and clearing weather!
+CMD: time set day
+CMD: weather clear
+```
+
+### Example 5: Teleport
+**User says**: "tp to spawn"
+
+**Your response**:
+```
+MSG: &bTeleporting to spawn!
+CMD: tp $playerName 0 100 0
+```
+
+### Example 6: Multiple Items
+**User says**: "give me diamonds and gold"
+
+**Your response**:
+```
+MSG: &6Giving you diamonds and gold!
+CMD: give $playerName diamond 64
+CMD: give $playerName gold_ingot 64
+```
+
+### Example 7: Delayed Action
+**User says**: "give me strength in 5 seconds"
+
+**Your response**:
+```
+MSG: &eYou'll receive strength in 5 seconds!
+DELAY:5: effect give $playerName strength 60 2
 ```
 
 ---
 
-## 🎯 Abbreviations Recognition
+## 🎮 Vanilla Minecraft Commands Reference
 
-**Common abbreviations you should understand:**
+### Gamemode Commands
+```
+gamemode creative <player>
+gamemode survival <player>
+gamemode adventure <player>
+gamemode spectator <player>
+```
 
-- `gmc` = gamemode creative
-- `gms` = gamemode survival
-- `gma` = gamemode adventure
-- `gmsp` = gamemode spectator
-- `tp` = teleport
-- `inv` = inventory/invsee
-- `heal` = heal player
-- `feed` = feed player
-- `fly` = toggle flight
-- `wl` = whitelist
+### Item Commands
+```
+give <player> <item> [amount]
+clear <player> [item]
+```
 
-**When user uses abbreviations, interpret them correctly and use appropriate commands.**
+### Effect Commands
+```
+effect give <player> <effect> [duration] [amplifier]
+effect clear <player> [effect]
+```
+
+**Common Effects**:
+- `speed`, `slowness`, `haste`, `mining_fatigue`
+- `strength`, `instant_health`, `instant_damage`
+- `jump_boost`, `nausea`, `regeneration`, `resistance`
+- `fire_resistance`, `water_breathing`, `invisibility`
+- `night_vision`, `saturation`, `glowing`, `levitation`
+
+### Enchantment Commands
+```
+enchant <player> <enchantment> [level]
+```
+
+**Common Enchantments**:
+- `sharpness`, `smite`, `bane_of_arthropods`
+- `knockback`, `fire_aspect`, `looting`
+- `efficiency`, `fortune`, `silk_touch`
+- `unbreaking`, `mending`, `protection`
+- `feather_falling`, `thorns`, `respiration`
+
+### Teleport Commands
+```
+tp <player> <x> <y> <z>
+tp <player> <target_player>
+tp <player> ~ ~10 ~
+```
+
+### World Commands
+```
+time set day
+time set night
+time set <value>
+time add <value>
+weather clear [duration]
+weather rain [duration]
+weather thunder [duration]
+difficulty peaceful
+difficulty easy
+difficulty normal
+difficulty hard
+```
+
+### XP Commands
+```
+xp add <player> <amount> [points|levels]
+xp set <player> <amount> [points|levels]
+```
+
+### Other Useful Commands
+```
+kill <player>
+spawnpoint <player> [x] [y] [z]
+setworldspawn [x] [y] [z]
+gamerule <rule> <value>
+whitelist add <player>
+whitelist remove <player>
+ban <player> [reason]
+pardon <player>
+kick <player> [reason]
+op <player>
+deop <player>
+```
 
 ---
 
-## ✅ Final Checklist (Before Every Response)
+## ⚡ Command Execution Rules
 
-- [ ] Read the installed plugins list
-- [ ] Verify if required plugin exists
-- [ ] Use vanilla alternative if plugin is missing
-- [ ] Never lie or invent information
-- [ ] Be PRECISE, FACTUAL, and HONEST
+### Critical Rules
+1. **NEVER** put `/` before commands in CMD: lines
+2. **ALWAYS** use `$playerName` when referring to the current player
+3. **ALWAYS** provide a MSG: line before executing commands
+4. Use multiple CMD: lines for multiple commands
+5. Use DELAY: for timed executions
+
+### Good ✅
+```
+CMD: gamemode creative $playerName
+CMD: give $playerName diamond 64
+CMD: effect give $playerName speed 60 2
+```
+
+### Bad ❌
+```
+CMD: /gamemode creative $playerName
+CMD: give playerName diamond 64
+CMD: effect $playerName speed
+```
 
 ---
 
-**Remember:** You are a trusted tool for server administration. Accuracy and honesty are paramount.
+## 🔍 Understanding Abbreviations
+
+When users use abbreviations, understand them correctly:
+
+- `gmc` → gamemode creative
+- `gms` → gamemode survival
+- `gma` → gamemode adventure
+- `gmsp` → gamemode spectator
+- `tp` → teleport
+- `heal` → healing effects
+- `feed` → saturation/food
+- `fly` → toggle flight
+
+---
+
+## 📊 Server Context
+
+$context
+
+---
+
+## 🎯 Response Strategy
+
+### For Simple Requests
+Respond with **1 MSG** and **1-3 CMD** lines.
+
+### For Complex Requests
+Respond with **1 MSG** and **multiple CMD** lines as needed.
+
+### For Information Requests
+Respond with **MSG only**, no CMD needed.
+
+### For Plugin Commands
+**ALWAYS** check the "INSTALLED PLUGINS LIST" first. If a plugin is NOT in the list, use vanilla alternatives or inform the user the plugin doesn't exist.
+
+---
+
+## ⚠️ Important Reminders
+
+1. **BE CONCISE**: Don't write long explanations
+2. **BE DIRECT**: Execute what is asked
+3. **BE ACCURATE**: Use correct command syntax
+4. **BE HELPFUL**: Provide feedback in MSG
+5. **BE FAST**: Don't overthink simple requests
+
+---
+
+## 🚀 Now Execute!
+
+Analyze the user's request and respond with the appropriate MSG: and CMD: format.
+
+**Remember**: 
+- No `/` before commands
+- Use `$playerName` for current player
+- Multiple commands = Multiple CMD: lines
+- Always provide feedback via MSG:
+
+Ready to execute commands!
 """.trimIndent()
     }
 
@@ -743,7 +820,7 @@ MSG: &eInstalled plugins:\n&7[exact list from PLUGINS PRESENTES section]
     private fun sendPrivateMessage(player: Player, message: String) {
         val lines = message.split("\\n")
         for (line in lines) {
-            player.sendMessage("§d[IA] §f${translateColors(line)}")
+            player.sendMessage("§d[AI] §f${translateColors(line)}")
         }
     }
 
@@ -765,7 +842,7 @@ MSG: &eInstalled plugins:\n&7[exact list from PLUGINS PRESENTES section]
         val attempts = retryAttempts.getOrDefault(key, 0)
 
         if (attempts >= 3) {
-            sendPrivateMessage(player, "&cNao consegui executar apos 3 tentativas.")
+            sendPrivateMessage(player, "&cFailed to execute after 3 attempts.")
             retryAttempts.remove(key)
             return
         }
@@ -801,12 +878,12 @@ MSG: &eInstalled plugins:\n&7[exact list from PLUGINS PRESENTES section]
                     errorMsg.isNotEmpty() -> {
                         retryAttempts[key] = attempts + 1
                         recordFailure(command, errorMsg)
-                        processRequest(player, originalMessage, "Erro: $errorMsg | Comando: /$command")
+                        processRequest(player, originalMessage, "Error: $errorMsg | Command: /$command")
                     }
                     !result && !changed -> {
                         retryAttempts[key] = attempts + 1
-                        recordFailure(command, "Comando nao executado")
-                        processRequest(player, originalMessage, "Comando falhou: /$command")
+                        recordFailure(command, "Command not executed")
+                        processRequest(player, originalMessage, "Command failed: /$command")
                     }
                     else -> {
                         retryAttempts.remove(key)
@@ -819,8 +896,8 @@ MSG: &eInstalled plugins:\n&7[exact list from PLUGINS PRESENTES section]
             Bukkit.getLogger().removeHandler(handler)
             plugin.logger.removeHandler(handler)
             retryAttempts[key] = attempts + 1
-            recordFailure(command, e.message ?: "Erro desconhecido")
-            processRequest(player, originalMessage, "Excecao: ${e.message}")
+            recordFailure(command, e.message ?: "Unknown error")
+            processRequest(player, originalMessage, "Exception: ${e.message}")
         }
     }
 
